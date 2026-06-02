@@ -1,0 +1,495 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #17212b;
+  --muted: #66717d;
+  --line: #d9e0e7;
+  --green: #0f8f5f;
+  --red: #c13d3d;
+  --blue: #2368a2;
+  --amber: #9a6719;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.app {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.workspace {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 30px;
+  line-height: 1.2;
+}
+
+.topbar p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.search {
+  display: flex;
+  gap: 10px;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 14px;
+  font-size: 15px;
+  outline: none;
+}
+
+.search input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(35, 104, 162, 0.14);
+}
+
+.search button {
+  width: 92px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--blue);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.status {
+  min-height: 42px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.result {
+  margin-top: 16px;
+}
+
+.hidden {
+  display: none;
+}
+
+.quote {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.eyebrow,
+.priceBlock span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.quote h2 {
+  margin-top: 4px;
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.priceBlock {
+  text-align: right;
+}
+
+.priceBlock strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 30px;
+  line-height: 1;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 360px;
+  margin-top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.sectionBlock {
+  margin-top: 16px;
+}
+
+.sectionTitle {
+  margin-bottom: 10px;
+}
+
+.sectionTitle h2 {
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.financeCard {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.financeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.financeHeader h3,
+.financeCard h3 {
+  margin-top: 5px;
+  font-size: 24px;
+}
+
+.profitPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.positivePill {
+  background: rgba(15, 143, 95, 0.12);
+  color: var(--green);
+}
+
+.negativePill {
+  background: rgba(193, 61, 61, 0.12);
+  color: var(--red);
+}
+
+.financeGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.financeMetric {
+  min-height: 76px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px;
+}
+
+.financeMetric span,
+.legend,
+.barGroup small,
+.financeEmpty {
+  color: var(--muted);
+}
+
+.financeMetric strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 19px;
+}
+
+.financeMetric em {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.financeChart {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.revenueDot,
+.revenueBar {
+  background: var(--blue);
+}
+
+.profitDot,
+.profitBar {
+  background: var(--green);
+}
+
+.lossBar {
+  background: var(--red);
+}
+
+.financeBars {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+  min-height: 160px;
+  margin-top: 12px;
+}
+
+.barGroup {
+  min-width: 0;
+  text-align: center;
+}
+
+.bars {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  gap: 6px;
+  height: 128px;
+}
+
+.bar {
+  display: block;
+  width: 22px;
+  border-radius: 5px 5px 0 0;
+}
+
+.barGroup small {
+  display: block;
+  margin-top: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panelGrid {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.plan,
+.periodCard {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.plan h3 {
+  margin-top: 6px;
+  font-size: 28px;
+}
+
+.plan p {
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+dl {
+  margin: 18px 0 0;
+}
+
+dl div {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+dd {
+  margin: 6px 0 0;
+  line-height: 1.55;
+}
+
+.periods {
+  display: grid;
+  gap: 12px;
+}
+
+.periodCard {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.periodCard h3 {
+  font-size: 20px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #eef3f7;
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric {
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 16px;
+}
+
+.notes {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.notes li + li {
+  margin-top: 4px;
+}
+
+.positive {
+  color: var(--green);
+}
+
+.negative {
+  color: var(--red);
+}
+
+.neutral {
+  color: var(--amber);
+}
+
+.disclaimer {
+  max-width: 1180px;
+  margin: 18px auto 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 860px) {
+  .app {
+    padding: 18px;
+  }
+
+  .topbar,
+  .panelGrid,
+  .periodCard {
+    grid-template-columns: 1fr;
+  }
+
+  .quote {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .priceBlock {
+    text-align: left;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .financeGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .search {
+    flex-direction: column;
+  }
+
+  .search button {
+    width: 100%;
+  }
+
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .financeGrid,
+  .financeBars {
+    grid-template-columns: 1fr;
+  }
+
+  .financeHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

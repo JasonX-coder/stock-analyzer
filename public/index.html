@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>股票走势分析</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="workspace">
+        <div class="topbar">
+          <div>
+            <h1>股票走势分析</h1>
+            <p>输入股票代码或名称，查看走势、交易计划和公司财务情况。</p>
+          </div>
+          <form id="searchForm" class="search">
+            <input id="queryInput" autocomplete="off" placeholder="例如 AAPL、0700、600519、贵州茅台" />
+            <button type="submit">分析</button>
+          </form>
+        </div>
+
+        <div id="status" class="status">等待输入。</div>
+
+        <section id="result" class="result hidden">
+          <div class="quote">
+            <div>
+              <span id="exchange" class="eyebrow"></span>
+              <h2 id="stockName"></h2>
+            </div>
+            <div class="priceBlock">
+              <span id="symbol"></span>
+              <strong id="price"></strong>
+            </div>
+          </div>
+
+          <canvas id="chart" width="1100" height="360"></canvas>
+
+          <section class="sectionBlock">
+            <div class="sectionTitle">
+              <span class="eyebrow">Fundamentals</span>
+              <h2>公司财务情况</h2>
+            </div>
+            <div id="financialPanel" class="financialPanel"></div>
+          </section>
+
+          <div class="panelGrid">
+            <article class="plan">
+              <span class="eyebrow">综合结论</span>
+              <h3 id="bias"></h3>
+              <p id="reason"></p>
+              <dl>
+                <div><dt>买入区间</dt><dd id="buyZone"></dd></div>
+                <div><dt>卖出/止损</dt><dd id="sellZone"></dd></div>
+                <div><dt>风险控制</dt><dd id="risk"></dd></div>
+              </dl>
+            </article>
+
+            <div id="periods" class="periods"></div>
+          </div>
+        </section>
+      </section>
+      <p class="disclaimer">本工具只做行情、财务和技术形态分析，不构成投资建议。买卖决策需结合你的资金、风险承受能力和最新公告。</p>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>
