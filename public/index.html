@@ -3,64 +3,118 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>股票走势分析</title>
+    <title>每日股市情报速览</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="app">
-      <section class="workspace">
+      <div class="workspace">
+
+        <!-- 顶栏 -->
         <div class="topbar">
           <div>
-            <h1>股票走势分析</h1>
-            <p>输入股票代码或名称，查看走势、交易计划和公司财务情况。</p>
+            <h1>每日股市情报速览</h1>
+            <p id="reportTime">加载中...</p>
           </div>
-          <form id="searchForm" class="search">
-            <input id="queryInput" autocomplete="off" placeholder="例如 AAPL、0700、600519、贵州茅台" />
-            <button type="submit">分析</button>
-          </form>
+          <div class="topbar-actions">
+            <button id="refreshBtn" class="btn-primary">刷新数据</button>
+            <button id="saveBtn" class="btn-outline">保存图片</button>
+            <form id="searchForm" class="search">
+              <input id="queryInput" autocomplete="off" placeholder="输入代码或名称查个股" />
+              <button type="submit" class="btn-primary">分析</button>
+            </form>
+          </div>
         </div>
 
-        <div id="status" class="status">等待输入。</div>
+        <div id="dashStatus" class="status">正在加载情报...</div>
 
-        <section id="result" class="result hidden">
-          <div class="quote">
-            <div>
-              <span id="exchange" class="eyebrow"></span>
-              <h2 id="stockName"></h2>
-            </div>
-            <div class="priceBlock">
-              <span id="symbol"></span>
-              <strong id="price"></strong>
-            </div>
-          </div>
+        <!-- 主仪表盘 -->
+        <div id="dashboard">
 
-          <canvas id="chart" width="1100" height="360"></canvas>
-
-          <section class="sectionBlock">
-            <div class="sectionTitle">
-              <span class="eyebrow">Fundamentals</span>
-              <h2>公司财务情况</h2>
+          <!-- 第一行：市场指数 -->
+          <section class="dash-section">
+            <h2 class="section-title">市场指数</h2>
+            <div id="indexGrid" class="index-grid">
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
             </div>
-            <div id="financialPanel" class="financialPanel"></div>
           </section>
 
-          <div class="panelGrid">
-            <article class="plan">
-              <span class="eyebrow">综合结论</span>
-              <h3 id="bias"></h3>
-              <p id="reason"></p>
-              <dl>
-                <div><dt>买入区间</dt><dd id="buyZone"></dd></div>
-                <div><dt>卖出/止损</dt><dd id="sellZone"></dd></div>
-                <div><dt>风险控制</dt><dd id="risk"></dd></div>
-              </dl>
-            </article>
+          <!-- 第二行：推荐股票 + 行业 -->
+          <div class="two-col">
+            <section class="dash-section">
+              <h2 class="section-title">今日优质股推荐</h2>
+              <div id="recommendList" class="stock-list">
+                <div class="skeleton-card tall"></div>
+              </div>
+            </section>
 
-            <div id="periods" class="periods"></div>
+            <section class="dash-section">
+              <h2 class="section-title">重点行业上下游</h2>
+              <div id="industryMap" class="industry-map">
+                <div class="skeleton-card tall"></div>
+              </div>
+            </section>
           </div>
-        </section>
-      </section>
-      <p class="disclaimer">本工具只做行情、财务和技术形态分析，不构成投资建议。买卖决策需结合你的资金、风险承受能力和最新公告。</p>
+
+          <!-- 第三行：重点监控 -->
+          <section class="dash-section">
+            <h2 class="section-title">重点股票监控</h2>
+            <div id="watchGrid" class="watch-grid">
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+              <div class="skeleton-card"></div>
+            </div>
+          </section>
+
+        </div>
+
+        <!-- 个股分析弹层 -->
+        <div id="stockModal" class="modal hidden">
+          <div class="modal-content">
+            <button class="modal-close" id="modalClose">✕</button>
+            <div id="status" class="status">等待输入。</div>
+            <section id="result" class="result hidden">
+              <div class="quote">
+                <div>
+                  <span id="exchange" class="eyebrow"></span>
+                  <h2 id="stockName"></h2>
+                </div>
+                <div class="priceBlock">
+                  <span id="symbol"></span>
+                  <strong id="price"></strong>
+                </div>
+              </div>
+              <canvas id="chart" width="1100" height="300"></canvas>
+              <section class="sectionBlock">
+                <div class="sectionTitle">
+                  <span class="eyebrow">Fundamentals</span>
+                  <h2>公司财务情况</h2>
+                </div>
+                <div id="financialPanel" class="financialPanel"></div>
+              </section>
+              <div class="panelGrid">
+                <article class="plan">
+                  <span class="eyebrow">综合结论</span>
+                  <h3 id="bias"></h3>
+                  <p id="reason"></p>
+                  <dl>
+                    <div><dt>买入区间</dt><dd id="buyZone"></dd></div>
+                    <div><dt>卖出/止损</dt><dd id="sellZone"></dd></div>
+                    <div><dt>风险控制</dt><dd id="risk"></dd></div>
+                  </dl>
+                </article>
+                <div id="periods" class="periods"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <p class="disclaimer">本工具仅做行情与技术分析，不构成投资建议。买卖决策需结合自身风险承受能力。</p>
+      </div>
     </main>
     <script src="./app.js"></script>
   </body>
