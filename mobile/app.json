@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "股市情报速览",
+    "slug": "stock-analyzer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "stockanalyzer",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.silkchen.stockanalyzer",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "CFBundleLocalizations": ["zh-CN", "en"],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "associatedDomains": []
+    },
+    "android": {
+      "package": "com.silkchen.stockanalyzer",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0E14",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      },
+      "apiBaseUrl": "http://127.0.0.1:4173",
+      "revenueCatApiKey": ""
+    },
+    "updates": {
+      "url": ""
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
+  }
+}

@@ -5,6 +5,48 @@
 > 适合用来快速做盘前观察、个股复盘和多周期交易计划整理。  
 > 本项目只做数据分析和风险提示，不构成投资建议。
 
+## 项目结构
+
+```
+stock-analyzer/
+├── server.js          # Node.js 后端：多源行情 API（新浪→腾讯→东方财富回退）
+├── public/            # 原 Web 版（保留可用）
+├── render.yaml        # Render 部署配置
+└── mobile/            # React Native (Expo) iOS App
+    ├── app/           # Expo Router 页面（自选/搜索/分析/付费墙/设置）
+    ├── src/           # API 客户端、状态管理、主题、组件、订阅
+    ├── ios/           # prebuild 生成的原生工程 + PrivacyInfo.xcprivacy
+    ├── docs/APPSTORE-GUIDE.md   # 上架操作手册
+    └── eas.json       # EAS Build 配置
+```
+
+## 两种使用方式
+
+### Web 版（原有）
+```bash
+npm start          # http://127.0.0.1:4173
+```
+
+### iOS App 版（新增）
+```bash
+cd mobile
+npx expo run:ios   # 模拟器运行
+```
+上架流程见 `mobile/docs/APPSTORE-GUIDE.md`。
+
+## 后端 API
+
+| 端点 | 说明 |
+| --- | --- |
+| `GET /api/health` | 健康检查 |
+| `GET /api/analyze?q=` | 聚合分析（行情+财务+周期+计划，兼容旧 Web） |
+| `GET /api/search?q=` | 搜索/解析证券 |
+| `GET /api/quote?q=` | 实时报价（多源回退） |
+| `GET /api/kline?q=&days=&klt=` | K 线数据 |
+| `GET /api/finance?q=` | 财务摘要 |
+
+实时报价多源链：新浪 → 腾讯 → 东方财富，自动容错，GBK 编码已处理。
+
 ## Highlights
 
 | 模块 | 能力 | 结果 |

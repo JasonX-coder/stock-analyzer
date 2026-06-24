@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -16,18 +16,152 @@ const mimeTypes = {
 };
 
 const json = (res, status, payload) => {
-  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Access-Control-Allow-Origin": "*"
+  });
   res.end(JSON.stringify(payload));
 };
 
-async function fetchJson(url) {
-  const response = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 stock-analyzer-local-app" }
-  });
-  if (!response.ok) {
-    throw new Error(`行情源返回 ${response.status}`);
+async function fetchJson(url, { headers, timeoutMs = 6000 } = {}) {
+  const target = new URL(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: headers || {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        Referer: "https://quote.eastmoney.com/",
+        Origin: "https://quote.eastmoney.com",
+        Connection: "keep-alive"
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const detail = body ? `: ${body.slice(0, 120)}` : "";
+      throw new Error(`行情源 ${target.host} 返回 ${response.status}${detail}`);
+    }
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
   }
-  return response.json();
+}
+
+// 抓取纯文本行情（新浪/腾讯返回 var xxx="..."; 格式，通常 GBK 编码）
+async function fetchText(url, { headers, timeoutMs = 6000 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: headers || {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        Accept: "*/*",
+        Referer: "https://finance.sina.com.cn/"
+      },
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`行情源 ${new URL(url).host} 返回 ${response.status}`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    // 新浪/腾讯行情接口返回 GBK；用 TextDecoder 解码避免中文乱码
+    const ctype = response.headers.get("content-type") || "";
+    const useGbk = /gbk|gb2312/i.test(ctype) || /sinajs|gtimg/.test(url);
+    if (useGbk) {
+      try {
+        return new TextDecoder("gbk").decode(buffer);
+      } catch {
+        return buffer.toString("utf8");
+      }
+    }
+    return buffer.toString("utf8");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 把证券统一标识转成各源需要的代码格式
+function toSourceCodes(security) {
+  const [market, code] = security.secid.split(".");
+  // 新浪：sh/sz/hk/us
+  let sina = null;
+  if (market === "1") sina = `sh${code}`;
+  else if (market === "0") sina = `sz${code}`;
+  else if (market === "116") sina = `hk0${code}`.replace(/^hk0(\d{5})$/, "hk$1");
+  else if (market === "105") sina = `gb_$${code.toLowerCase()}`;
+  // 腾讯：sh/sz/hk/us
+  let tencent = null;
+  if (market === "1") tencent = `sh${code}`;
+  else if (market === "0") tencent = `sz${code}`;
+  else if (market === "116") tencent = `hk${code}`;
+  else if (market === "105") tencent = `us${code}`;
+  return { sina, tencent };
+}
+
+// 新浪实时报价：返回 { price, previousClose, high, low, open, name, source }
+async function getSinaQuote(security) {
+  const { sina } = toSourceCodes(security);
+  if (!sina) throw new Error("新浪不支持该市场");
+  const text = await fetchText(`https://hq.sinajs.cn/list=${sina}`, {
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+      Referer: "https://finance.sina.com.cn/"
+    }
+  });
+  const match = text.match(/="([^"]*)"/);
+  if (!match || !match[1]) throw new Error("新浪未返回行情");
+  const fields = match[1].split(",");
+  if (fields.length < 6) throw new Error("新浪行情字段不全");
+  const name = fields[0] || security.name;
+  const open = Number(fields[1]);
+  const previousClose = Number(fields[2]);
+  const price = Number(fields[3]);
+  const high = Number(fields[4]);
+  const low = Number(fields[5]);
+  if (!Number.isFinite(price) || price === 0) throw new Error("新浪价格为空");
+  return { name, price, previousClose, open, high, low, source: "sina" };
+}
+
+// 腾讯实时报价（备份）
+async function getTencentQuote(security) {
+  const { tencent } = toSourceCodes(security);
+  if (!tencent) throw new Error("腾讯不支持该市场");
+  const text = await fetchText(`https://qt.gtimg.cn/q=${tencent}`, {
+    headers: { Referer: "https://gu.qq.com/" }
+  });
+  const match = text.match(/="([^"]*)"/);
+  if (!match || !match[1]) throw new Error("腾讯未返回行情");
+  const fields = match[1].split("~");
+  if (fields.length < 5) throw new Error("腾讯行情字段不全");
+  const name = fields[1] || security.name;
+  const price = Number(fields[3]);
+  const previousClose = Number(fields[4]);
+  if (!Number.isFinite(price) || price === 0) throw new Error("腾讯价格为空");
+  return { name, price, previousClose, source: "tencent" };
+}
+
+// 多源实时报价：新浪 → 腾讯 → 东方财富 K线末值
+async function getRealtimeQuote(security) {
+  const sources = [getSinaQuote, getTencentQuote];
+  for (const src of sources) {
+    try {
+      return await src(security);
+    } catch (e) {
+      // 尝试下一个源
+    }
+  }
+  // 最终回退：用东方财富当日 K 线末值
+  const today = dateText(new Date());
+  const dayChart = await getEastmoneyKlines(security, 5, today, today).catch(() => null);
+  const last = dayChart?.rows?.at(-1);
+  if (!last) throw new Error("所有行情源都不可用");
+  return {
+    name: dayChart?.name || security.name,
+    price: last.close,
+    previousClose: dayChart.previousClose,
+    source: "eastmoney"
+  };
 }
 
 function secidFromCode(value) {
@@ -87,6 +221,23 @@ async function resolveSecurity(query) {
   const meta = marketMeta(match);
   if (!meta) throw new Error("没有找到匹配的股票，请换用股票代码。");
   return { ...meta, name: match.Name || meta.symbol };
+}
+
+// 搜索建议列表（给 App 搜索框用）
+async function suggestSecurities(query) {
+  const url = `https://searchapi.eastmoney.com/api/suggest/get?input=${encodeURIComponent(query)}&type=14&token=44c9d251add88e27b65ed86506f6e5da&count=10`;
+  const data = await fetchJson(url).catch(() => null);
+  const items = data?.QuotationCodeTable?.Data || [];
+  return items
+    .filter((item) => {
+      const classify = item.Classify || "";
+      return ["AStock", "HKStock", "USStock"].some((type) => classify.includes(type));
+    })
+    .map((item) => {
+      const meta = marketMeta(item);
+      return meta ? { ...meta, name: item.Name || meta.symbol } : null;
+    })
+    .filter(Boolean);
 }
 
 function dateText(date) {
@@ -340,15 +491,39 @@ async function analyze(query) {
 
 async function serveStatic(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const requested = url.pathname === "/" ? "/index.html" : url.pathname;
-  const safePath = normalize(requested).replace(/^(\.\.[/\\])+/, "");
-  const filePath = join(publicDir, safePath);
-  if (!filePath.startsWith(publicDir)) {
+  const requested = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
+  let filePath = resolve(publicDir, requested);
+  const publicRoot = `${publicDir}/`;
+
+  if (filePath !== publicDir && !filePath.startsWith(publicRoot)) {
     res.writeHead(403);
     res.end("Forbidden");
     return;
   }
-  const body = await readFile(filePath);
+
+  let body;
+  // 支持 /privacy、/terms 这类无扩展名的页面：找不到时尝试追加 .html
+  try {
+    body = await readFile(filePath);
+  } catch (error) {
+    if ((error?.code === "ENOENT" || error?.code === "EISDIR") && !extname(filePath)) {
+      filePath += ".html";
+      try {
+        body = await readFile(filePath);
+      } catch (e2) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Not found");
+        return;
+      }
+    } else if (error?.code === "ENOENT" || error?.code === "EISDIR") {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not found");
+      return;
+    } else {
+      throw error;
+    }
+  }
+
   res.writeHead(200, { "Content-Type": mimeTypes[extname(filePath)] || "application/octet-stream" });
   res.end(body);
 }
@@ -356,12 +531,74 @@ async function serveStatic(req, res) {
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    const cors = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type"
+    };
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, cors);
+      res.end();
+      return;
+    }
+
+    if (url.pathname === "/api/health") {
+      return json(res, 200, { ok: true, service: "stock-analyzer", version: "1.1.0", time: new Date().toISOString() });
+    }
+
     if (url.pathname === "/api/analyze") {
       const query = url.searchParams.get("q") || "";
       if (!query.trim()) return json(res, 400, { error: "请输入股票代码或名称" });
       const result = await analyze(query);
       return json(res, 200, result);
     }
+
+    // 细粒度端点：搜索/解析证券
+    if (url.pathname === "/api/search") {
+      const query = url.searchParams.get("q") || "";
+      if (!query.trim()) return json(res, 400, { error: "请输入股票代码或名称" });
+      const direct = secidFromCode(query);
+      if (direct) {
+        const quote = await getRealtimeQuote(direct).catch(() => null);
+        return json(res, 200, { ...direct, name: quote?.name || direct.symbol, price: quote?.price ?? null });
+      }
+      const items = await suggestSecurities(query);
+      return json(res, 200, { items });
+    }
+
+    // 细粒度端点：实时报价（多源）
+    if (url.pathname === "/api/quote") {
+      const q = url.searchParams.get("q") || "";
+      if (!q.trim()) return json(res, 400, { error: "请输入股票代码或名称" });
+      const security = await resolveSecurity(q);
+      const quote = await getRealtimeQuote(security);
+      return json(res, 200, { ...security, ...quote });
+    }
+
+    // 细粒度端点：K线
+    if (url.pathname === "/api/kline") {
+      const q = url.searchParams.get("q") || "";
+      const klt = Number(url.searchParams.get("klt") || 101);
+      const days = Number(url.searchParams.get("days") || 180);
+      if (!q.trim()) return json(res, 400, { error: "请输入股票代码或名称" });
+      const security = await resolveSecurity(q);
+      const end = dateText(new Date());
+      const beginDate = new Date();
+      beginDate.setDate(beginDate.getDate() - days);
+      const chart = await getEastmoneyKlines(security, klt, dateText(beginDate), end);
+      return json(res, 200, chart);
+    }
+
+    // 细粒度端点：财务摘要
+    if (url.pathname === "/api/finance") {
+      const q = url.searchParams.get("q") || "";
+      if (!q.trim()) return json(res, 400, { error: "请输入股票代码或名称" });
+      const security = await resolveSecurity(q);
+      const quote = await getRealtimeQuote(security).catch(() => ({ price: null }));
+      const financial = await getFinancialSummary(security, quote.price);
+      return json(res, 200, financial);
+    }
+
     await serveStatic(req, res);
   } catch (error) {
     if (req.url?.startsWith("/api/")) {
