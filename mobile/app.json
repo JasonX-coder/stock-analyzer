@@ -43,7 +43,7 @@
       "eas": {
         "projectId": ""
       },
-      "apiBaseUrl": "http://127.0.0.1:4173",
+      "apiBaseUrl": "https://stock-analyzer-4dhs.onrender.com",
       "revenueCatApiKey": ""
     },
     "updates": {
