@@ -41,6 +41,16 @@ export interface KlineResult extends SecurityRef {
   previousClose: number | null;
 }
 
+export interface DiscoverCard extends SecurityRef {
+  price: number | null;
+  previousClose: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  source: string;
+  spark: { time: string; close: number; high: number; low: number }[];
+}
+
 export interface PeriodAnalysis {
   label: string;
   available: boolean;
@@ -130,11 +140,14 @@ export const api = {
   health: () => request<{ ok: boolean; version: string }>("/api/health"),
   search: (q: string) =>
     request<{ items: SearchItem[] } & Partial<SecurityRef>>("/api/search", { q }),
-  quote: (q: string) => request<QuoteResult>("/api/quote", { q }),
+  // 优先用 secid 直接定位证券，避免用 symbol 重解析时港股/A 股等位数相同的代码串号
+  quote: (secid: string) => request<QuoteResult>("/api/quote", { secid }),
   kline: (q: string, days = 180, klt = 101) =>
     request<KlineResult>("/api/kline", { q, days, klt }),
   finance: (q: string) => request<FinancialSummary>("/api/finance", { q }),
   analyze: (q: string) => request<AnalyzeResult>("/api/analyze", { q }),
+  discover: (count = 12, watch: string[] = []) =>
+    request<{ cards: DiscoverCard[] }>("/api/discover", { count, watch: watch.join(",") }),
 };
 
 export { API_BASE };

@@ -33,7 +33,7 @@ export default function WatchlistScreen() {
     await Promise.all(
       items.map(async (it) => {
         try {
-          results[it.secid] = await api.quote(it.symbol);
+          results[it.secid] = await api.quote(it.secid);
         } catch {
           results[it.secid] = null;
         }

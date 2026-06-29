@@ -6,11 +6,13 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useSubscription } from "../src/store/subscription";
+import { API_BASE } from "../src/api/client";
 import { colors, font, radius, spacing } from "../src/theme";
 import {
   getPackages,
@@ -32,10 +34,11 @@ type Plan = {
 };
 
 // 当 RevenueCat 未配置（开发期）时的本地展示套餐
+// 终身档已移除：与上线后真实 RC offering（仅月/年）保持一致，且规避 Apple 对
+// 「非消耗型 + 自动续订」混用付费墙的审核风险。
 const MOCK_PLANS: Plan[] = [
   { id: "monthly", title: "月度", price: "¥18", per: "/月", desc: "灵活订阅，随时取消", highlight: false },
   { id: "yearly", title: "年度", price: "¥128", per: "/年", desc: "约 ¥10.6/月，省 40%", highlight: true, badge: "最划算" },
-  { id: "lifetime", title: "终身", price: "¥298", per: "一次性", desc: "一次买断，永久使用", highlight: false },
 ];
 
 export default function PaywallScreen() {
@@ -187,9 +190,18 @@ export default function PaywallScreen() {
           )}
         </Pressable>
         <Text style={styles.terms}>
-          订阅自动续费，可随时在系统设置取消。{"\n"}
-          首次订阅可享 3 天免费试用。
+          订阅自动续费，可随时在系统设置中取消。{"\n"}
+          付款将在确认后从您的 Apple ID 扣除。
         </Text>
+        <View style={styles.legalRow}>
+          <Pressable onPress={() => Linking.openURL(`${API_BASE}/privacy`)}>
+            <Text style={styles.legalLink}>隐私政策</Text>
+          </Pressable>
+          <Text style={styles.legalSep}>·</Text>
+          <Pressable onPress={() => Linking.openURL(`${API_BASE}/terms`)}>
+            <Text style={styles.legalLink}>用户协议</Text>
+          </Pressable>
+        </View>
         <Pressable onPress={restore}>
           <Text style={styles.restore}>恢复购买</Text>
         </Pressable>
@@ -291,6 +303,19 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: spacing.md,
   },
+  legalRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  legalLink: {
+    color: colors.textSecondary,
+    fontSize: font.size.caption,
+    textDecorationLine: "underline",
+  },
+  legalSep: { color: colors.textMuted, fontSize: font.size.caption },
   restore: {
     color: colors.brand,
     fontSize: font.size.footnote,

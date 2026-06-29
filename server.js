@@ -23,6 +23,32 @@ const json = (res, status, payload) => {
   res.end(JSON.stringify(payload));
 };
 
+// 简易 TTL 缓存 + 并发去重：同一 key 的并发请求只打一次上游，
+// 命中即返回缓存值；失败不缓存，避免错误被长期记住。
+const cacheStore = new Map();
+function withCache(key, ttlMs, producer) {
+  const now = Date.now();
+  const entry = cacheStore.get(key);
+  if (entry && entry.expires > now) return Promise.resolve(entry.value);
+  // 已有在途请求：复用，避免行情刷新时打爆上游
+  if (entry && entry.inflight) return entry.inflight;
+  const inflight = (async () => {
+    try {
+      const value = await producer();
+      cacheStore.set(key, { value, expires: Date.now() + ttlMs, inflight: null });
+      return value;
+    } catch (e) {
+      // 失败不缓存，清掉在途标记，下次重试
+      const cur = cacheStore.get(key);
+      if (cur) cur.inflight = null;
+      throw e;
+    }
+  })();
+  if (!entry) cacheStore.set(key, { value: undefined, expires: 0, inflight });
+  else entry.inflight = inflight;
+  return inflight;
+}
+
 async function fetchJson(url, { headers, timeoutMs = 6000 } = {}) {
   const target = new URL(url);
   const controller = new AbortController();
@@ -143,25 +169,39 @@ async function getTencentQuote(security) {
 
 // 多源实时报价：新浪 → 腾讯 → 东方财富 K线末值
 async function getRealtimeQuote(security) {
-  const sources = [getSinaQuote, getTencentQuote];
-  for (const src of sources) {
-    try {
-      return await src(security);
-    } catch (e) {
-      // 尝试下一个源
+  return withCache(`quote:${security.secid}`, 5000, async () => {
+    const sources = [getSinaQuote, getTencentQuote];
+    for (const src of sources) {
+      try {
+        return await src(security);
+      } catch (e) {
+        // 尝试下一个源
+      }
     }
-  }
-  // 最终回退：用东方财富当日 K 线末值
-  const today = dateText(new Date());
-  const dayChart = await getEastmoneyKlines(security, 5, today, today).catch(() => null);
-  const last = dayChart?.rows?.at(-1);
-  if (!last) throw new Error("所有行情源都不可用");
-  return {
-    name: dayChart?.name || security.name,
-    price: last.close,
-    previousClose: dayChart.previousClose,
-    source: "eastmoney"
-  };
+    // 最终回退：用东方财富当日 K 线末值
+    const today = dateText(new Date());
+    const dayChart = await getEastmoneyKlines(security, 5, today, today).catch(() => null);
+    const last = dayChart?.rows?.at(-1);
+    if (!last) throw new Error("所有行情源都不可用");
+    return {
+      name: dayChart?.name || security.name,
+      price: last.close,
+      previousClose: dayChart.previousClose,
+      source: "eastmoney"
+    };
+  });
+}
+
+// 由 secid（market.code）直接还原 security，跳过搜索解析，
+// 避免用 symbol 重新解析时把港股/A股等位数相同的代码串号。
+function securityFromSecid(secid) {
+  const [market, code] = secid.split(".");
+  if (!market || !code) return null;
+  if (market === "1") return { secid, symbol: code, exchange: "沪深A股 · 上海", currency: "CNY", name: code };
+  if (market === "0") return { secid, symbol: code, exchange: "沪深A股 · 深圳", currency: "CNY", name: code };
+  if (market === "116") return { secid, symbol: code, exchange: "港股", currency: "HKD", name: code };
+  if (market === "105") return { secid, symbol: code, exchange: "美股", currency: "USD", name: code };
+  return null;
 }
 
 function secidFromCode(value) {
@@ -210,17 +250,19 @@ async function resolveSecurity(query) {
   const direct = secidFromCode(query);
   if (direct) return { ...direct, name: direct.symbol };
 
-  const url = `https://searchapi.eastmoney.com/api/suggest/get?input=${encodeURIComponent(query)}&type=14&token=44c9d251add88e27b65ed86506f6e5da&count=8`;
-  const data = await fetchJson(url);
-  const items = data.QuotationCodeTable?.Data || [];
-  const match = items.find((item) => {
-    const classify = item.Classify || "";
-    return ["AStock", "HKStock", "USStock", "Fund"].some((type) => classify.includes(type));
-  }) || items[0];
+  return withCache(`resolve:${query}`, 600000, async () => {
+    const url = `https://searchapi.eastmoney.com/api/suggest/get?input=${encodeURIComponent(query)}&type=14&token=44c9d251add88e27b65ed86506f6e5da&count=8`;
+    const data = await fetchJson(url);
+    const items = data.QuotationCodeTable?.Data || [];
+    const match = items.find((item) => {
+      const classify = item.Classify || "";
+      return ["AStock", "HKStock", "USStock", "Fund"].some((type) => classify.includes(type));
+    }) || items[0];
 
-  const meta = marketMeta(match);
-  if (!meta) throw new Error("没有找到匹配的股票，请换用股票代码。");
-  return { ...meta, name: match.Name || meta.symbol };
+    const meta = marketMeta(match);
+    if (!meta) throw new Error("没有找到匹配的股票，请换用股票代码。");
+    return { ...meta, name: match.Name || meta.symbol };
+  });
 }
 
 // 搜索建议列表（给 App 搜索框用）
@@ -238,6 +280,139 @@ async function suggestSecurities(query) {
       return meta ? { ...meta, name: item.Name || meta.symbol } : null;
     })
     .filter(Boolean);
+}
+
+// 发现页卡片池：横跨 A 股 / 港股 / 美股的高知名度标的，
+// 供「发现」翻卡页兜底使用。每次随机洗牌取若干只，避免每次都一样。
+const DISCOVER_POOL = [
+  // A 股（沪深）
+  "1.600519", "0.000001", "1.601318", "0.000858", "1.600036", "0.002594",
+  "1.601899", "0.000333", "1.600276", "0.002475", "1.601012", "0.300750",
+  // 港股
+  "116.00700", "116.09988", "116.03690", "116.09618", "116.00020",
+  // 美股
+  "105.AAPL", "105.TSLA", "105.NVDA", "105.AMZN", "105.MSFT", "105.GOOG",
+];
+
+// 东财涨幅榜：按市场拉当日涨幅前列的 secid，用于「同类型相关推荐」
+// market: "1.0"=沪深A股, "116"=港股, "105"=美股
+async function getHotList(market, size = 20) {
+  return withCache(`hotlist:${market}`, 60000, async () => {
+    // 沪深A股用 fs=m:0 t:6 / m:1 t:80 两个板合并；港股 m:128 t:3；美股 m:105 t:6
+    const boards =
+      market === "116" ? [{ fs: "m:128 t:3", market: "116" }] :
+      market === "105" ? [{ fs: "m:105 t:6", market: "105" }] :
+      [{ fs: "m:1 t:2", market: "1" }, { fs: "m:0 t:6", market: "0" }];
+    const params = new URLSearchParams({
+      pn: "1",
+      pz: String(size),
+      po: "1", // 降序
+      np: "1",
+      fltt: "2",
+      invt: "2",
+      fid: "f3", // 按涨幅排
+      fields: "f12,f14,f3", // 代码,名称,涨幅
+    });
+    const all = await Promise.all(
+      boards.map(async (b) => {
+        try {
+          const data = await fetchJson(
+            `https://push2.eastmoney.com/api/qt/clist/get?${params}&fs=${encodeURIComponent(b.fs)}`
+          );
+          return (data?.data?.diff || []).map((d) => ({
+            secid: `${b.market}.${d.f12}`,
+            symbol: String(d.f12),
+            name: d.f14,
+            changePct: Number(d.f3),
+          }));
+        } catch {
+          return [];
+        }
+      })
+    );
+    // 合并后按涨幅降序取前 size
+    return all.flat().sort((a, b) => (b.changePct || 0) - (a.changePct || 0)).slice(0, size);
+  });
+}
+
+// 由 secid 构造一张发现页卡片（报价 + 近 30 日迷你走势）
+async function buildDiscoverCard(secid) {
+  const security = securityFromSecid(secid);
+  if (!security) return null;
+  try {
+    const quote = await getRealtimeQuote(security);
+    const end = dateText(new Date());
+    const beginDate = new Date();
+    beginDate.setDate(beginDate.getDate() - 35);
+    const chart = await getEastmoneyKlines(security, 101, dateText(beginDate), end).catch(() => null);
+    const rows = (chart?.rows || []).slice(-30).map((r) => ({
+      time: r.time,
+      close: r.close,
+      high: r.high,
+      low: r.low,
+    }));
+    return {
+      secid: security.secid,
+      symbol: security.symbol,
+      name: quote.name || security.name,
+      exchange: security.exchange,
+      currency: security.currency,
+      price: quote.price,
+      previousClose: quote.previousClose,
+      open: quote.open ?? null,
+      high: quote.high ?? null,
+      low: quote.low ?? null,
+      source: quote.source,
+      spark: rows,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// 发现页：返回一批卡片，含实时报价 + 近 30 日迷你走势 K 线
+// 排序策略：用户自选股优先（每日先过一遍自选）→ 同类型相关（自选所在市场的涨幅榜）
+//           → 固定知名池兜底。watch 为逗号分隔的 secid 列表。
+async function discoverCards(count = 12, watch = "") {
+  const watchSecids = watch
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((s) => securityFromSecid(s)); // 只保留合法 secid
+
+  // 缓存 key 包含自选集合，避免不同用户串；但用排序后的哈希避免顺序影响
+  const watchKey = watchSecids.slice().sort().join(",") || "none";
+  return withCache(`discover:${count}:${watchKey}`, 20000, async () => {
+    // 1) 自选优先
+    const ordered = new Set(watchSecids);
+
+    // 2) 同类型相关：取自选所在市场的涨幅榜补充
+    const watchMarkets = [...new Set(watchSecids.map((s) => s.split(".")[0]))];
+    if (watchMarkets.length) {
+      const hot = await Promise.all(watchMarkets.map((m) => getHotList(m, 24)));
+      for (const item of hot.flat()) {
+        if (ordered.size < count * 2) ordered.add(item.secid);
+      }
+    }
+
+    // 3) 固定池兜底洗牌补充
+    const seed = Number(BigInt(Date.now()) / 20000n);
+    const pool = DISCOVER_POOL.slice();
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = (seed * (i + 7) + 13) % (i + 1);
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    for (const secid of pool) {
+      if (ordered.size < count * 2) ordered.add(secid);
+    }
+
+    // 保持「自选在前」顺序：用插入顺序
+    const picks = [...ordered].slice(0, count * 2);
+
+    const cards = await Promise.all(picks.map(buildDiscoverCard));
+    // 过滤掉失败的，截到 count
+    return cards.filter(Boolean).slice(0, count);
+  });
 }
 
 function dateText(date) {
@@ -262,26 +437,28 @@ function parseKline(line) {
 }
 
 async function getEastmoneyKlines(security, klt, begin, end) {
-  const params = new URLSearchParams({
-    secid: security.secid,
-    fields1: "f1,f2,f3,f4,f5,f6",
-    fields2: "f51,f52,f53,f54,f55,f56,f57,f58",
-    klt: String(klt),
-    fqt: "1",
-    beg: begin,
-    end
+  return withCache(`kline:${security.secid}:${klt}:${begin}:${end}`, 30000, async () => {
+    const params = new URLSearchParams({
+      secid: security.secid,
+      fields1: "f1,f2,f3,f4,f5,f6",
+      fields2: "f51,f52,f53,f54,f55,f56,f57,f58",
+      klt: String(klt),
+      fqt: "1",
+      beg: begin,
+      end
+    });
+    const data = await fetchJson(`https://push2his.eastmoney.com/api/qt/stock/kline/get?${params}`);
+    if (data.rc !== 0 || !data.data?.klines?.length) {
+      throw new Error("行情源没有返回 K 线数据。");
+    }
+    return {
+      ...security,
+      name: data.data.name || security.name,
+      symbol: data.data.code || security.symbol,
+      rows: data.data.klines.map(parseKline),
+      previousClose: Number(data.data.preKPrice) || null
+    };
   });
-  const data = await fetchJson(`https://push2his.eastmoney.com/api/qt/stock/kline/get?${params}`);
-  if (data.rc !== 0 || !data.data?.klines?.length) {
-    throw new Error("行情源没有返回 K 线数据。");
-  }
-  return {
-    ...security,
-    name: data.data.name || security.name,
-    symbol: data.data.code || security.symbol,
-    rows: data.data.klines.map(parseKline),
-    previousClose: Number(data.data.preKPrice) || null
-  };
 }
 
 function unitValue(value) {
@@ -294,63 +471,66 @@ function unitValue(value) {
 
 async function getFinancialSummary(security, latestPrice) {
   const secucode = eastmoneySecucode(security);
-  const params = new URLSearchParams({
-    reportName: "RPT_F10_FINANCE_MAINFINADATA",
-    columns: "ALL",
-    quoteColumns: "",
-    filter: `(SECUCODE="${secucode}")`,
-    pageNumber: "1",
-    pageSize: "4",
-    sortTypes: "-1",
-    sortColumns: "REPORT_DATE",
-    source: "HSF10",
-    client: "PC"
-  });
+  // 财务数据更新频率低（按季报），缓存 6 小时；PE 基于缓存时的价格，足够参考。
+  return withCache(`finance:${secucode}`, 6 * 60 * 60 * 1000, async () => {
+    const params = new URLSearchParams({
+      reportName: "RPT_F10_FINANCE_MAINFINADATA",
+      columns: "ALL",
+      quoteColumns: "",
+      filter: `(SECUCODE="${secucode}")`,
+      pageNumber: "1",
+      pageSize: "4",
+      sortTypes: "-1",
+      sortColumns: "REPORT_DATE",
+      source: "HSF10",
+      client: "PC"
+    });
 
-  const data = await fetchJson(`https://datacenter.eastmoney.com/securities/api/data/v1/get?${params}`).catch(() => null);
-  const rows = data?.result?.data || [];
-  if (!rows.length) {
+    const data = await fetchJson(`https://datacenter.eastmoney.com/securities/api/data/v1/get?${params}`).catch(() => null);
+    const rows = data?.result?.data || [];
+    if (!rows.length) {
+      return {
+        available: false,
+        secucode,
+        summary: "该市场或该公司暂未返回可用财务摘要数据。"
+      };
+    }
+
+    const latest = rows[0];
+    const revenue = unitValue(Number(latest.TOTALOPERATEREVE));
+    const parentNetProfit = unitValue(Number(latest.PARENTNETPROFIT));
+    const eps = Number(latest.EPSJB);
+    const pe = Number.isFinite(latestPrice) && Number.isFinite(eps) && eps > 0 ? latestPrice / eps : null;
+    const netMargin = Number(latest.XSJLL);
+    const grossMargin = Number(latest.XSMLL);
+    const isLoss = Number(latest.PARENTNETPROFIT) < 0;
+
     return {
-      available: false,
+      available: true,
       secucode,
-      summary: "该市场或该公司暂未返回可用财务摘要数据。"
+      reportDate: latest.REPORT_DATE_NAME || latest.REPORT_DATE,
+      reportType: latest.REPORT_TYPE || "",
+      revenue,
+      revenueRaw: Number(latest.TOTALOPERATEREVE),
+      revenueGrowth: pct(Number(latest.TOTALOPERATEREVETZ)),
+      parentNetProfit,
+      parentNetProfitRaw: Number(latest.PARENTNETPROFIT),
+      parentNetProfitGrowth: pct(Number(latest.PARENTNETPROFITTZ)),
+      grossMargin: pct(grossMargin),
+      netMargin: pct(netMargin),
+      roe: pct(Number(latest.ROEJQ)),
+      debtRatio: pct(Number(latest.ZCFZL)),
+      eps: pct(eps),
+      pe: pe ? pct(pe) : null,
+      isLoss,
+      profitStatus: isLoss ? "当前亏损" : "当前盈利",
+      history: rows.slice().reverse().map((row) => ({
+        label: row.REPORT_DATE_NAME || row.REPORT_DATE,
+        revenue: Number(row.TOTALOPERATEREVE),
+        parentNetProfit: Number(row.PARENTNETPROFIT)
+      })).filter((row) => Number.isFinite(row.revenue) && Number.isFinite(row.parentNetProfit))
     };
-  }
-
-  const latest = rows[0];
-  const revenue = unitValue(Number(latest.TOTALOPERATEREVE));
-  const parentNetProfit = unitValue(Number(latest.PARENTNETPROFIT));
-  const eps = Number(latest.EPSJB);
-  const pe = Number.isFinite(latestPrice) && Number.isFinite(eps) && eps > 0 ? latestPrice / eps : null;
-  const netMargin = Number(latest.XSJLL);
-  const grossMargin = Number(latest.XSMLL);
-  const isLoss = Number(latest.PARENTNETPROFIT) < 0;
-
-  return {
-    available: true,
-    secucode,
-    reportDate: latest.REPORT_DATE_NAME || latest.REPORT_DATE,
-    reportType: latest.REPORT_TYPE || "",
-    revenue,
-    revenueRaw: Number(latest.TOTALOPERATEREVE),
-    revenueGrowth: pct(Number(latest.TOTALOPERATEREVETZ)),
-    parentNetProfit,
-    parentNetProfitRaw: Number(latest.PARENTNETPROFIT),
-    parentNetProfitGrowth: pct(Number(latest.PARENTNETPROFITTZ)),
-    grossMargin: pct(grossMargin),
-    netMargin: pct(netMargin),
-    roe: pct(Number(latest.ROEJQ)),
-    debtRatio: pct(Number(latest.ZCFZL)),
-    eps: pct(eps),
-    pe: pe ? pct(pe) : null,
-    isLoss,
-    profitStatus: isLoss ? "当前亏损" : "当前盈利",
-    history: rows.slice().reverse().map((row) => ({
-      label: row.REPORT_DATE_NAME || row.REPORT_DATE,
-      revenue: Number(row.TOTALOPERATEREVE),
-      parentNetProfit: Number(row.PARENTNETPROFIT)
-    })).filter((row) => Number.isFinite(row.revenue) && Number.isFinite(row.parentNetProfit))
-  };
+  });
 }
 
 function sma(values, size) {
@@ -452,41 +632,44 @@ function tradePlan(day, week, month) {
 }
 
 async function analyze(query) {
-  const security = await resolveSecurity(query);
-  const today = new Date();
-  const monthAgo = new Date(today);
-  monthAgo.setDate(today.getDate() - 45);
-  const yearAgo = new Date(today);
-  yearAgo.setFullYear(today.getFullYear() - 1);
+  // 聚合结果短缓存：基于日 K 末值，5 秒内重复请求直接命中，抗并发刷新
+  return withCache(`analyze:${query}`, 5000, async () => {
+    const security = await resolveSecurity(query);
+    const today = new Date();
+    const monthAgo = new Date(today);
+    monthAgo.setDate(today.getDate() - 45);
+    const yearAgo = new Date(today);
+    yearAgo.setFullYear(today.getFullYear() - 1);
 
-  const [dayChart, dailyChart] = await Promise.all([
-    getEastmoneyKlines(security, 5, dateText(today), dateText(today)).catch(() => null),
-    getEastmoneyKlines(security, 101, dateText(yearAgo), dateText(today))
-  ]);
+    const [dayChart, dailyChart] = await Promise.all([
+      getEastmoneyKlines(security, 5, dateText(today), dateText(today)).catch(() => null),
+      getEastmoneyKlines(security, 101, dateText(yearAgo), dateText(today))
+    ]);
 
-  const intradayRows = dayChart?.rows?.length ? dayChart.rows : dailyChart.rows.slice(-2);
-  const weekRows = dailyChart.rows.slice(-5);
-  const monthRows = dailyChart.rows.filter((row) => row.time.replaceAll("-", "") >= dateText(monthAgo));
+    const intradayRows = dayChart?.rows?.length ? dayChart.rows : dailyChart.rows.slice(-2);
+    const weekRows = dailyChart.rows.slice(-5);
+    const monthRows = dailyChart.rows.filter((row) => row.time.replaceAll("-", "") >= dateText(monthAgo));
 
-  const latest = dailyChart.rows.at(-1);
-  const day = analyzePeriod(intradayRows, "当日", 5, 20);
-  const week = analyzePeriod(weekRows, "当周", 3, 5);
-  const month = analyzePeriod(monthRows, "当月", 5, 20);
-  const financial = await getFinancialSummary(security, latest?.close || null);
+    const latest = dailyChart.rows.at(-1);
+    const day = analyzePeriod(intradayRows, "当日", 5, 20);
+    const week = analyzePeriod(weekRows, "当周", 3, 5);
+    const month = analyzePeriod(monthRows, "当月", 5, 20);
+    const financial = await getFinancialSummary(security, latest?.close || null);
 
-  return {
-    asOf: new Date().toISOString(),
-    symbol: dailyChart.symbol,
-    name: dailyChart.name,
-    currency: security.currency,
-    exchange: security.exchange,
-    price: latest?.close || null,
-    previousClose: dailyChart.previousClose,
-    financial,
-    periods: { day, week, month },
-    plan: tradePlan(day, week, month),
-    chart: monthRows
-  };
+    return {
+      asOf: new Date().toISOString(),
+      symbol: dailyChart.symbol,
+      name: dailyChart.name,
+      currency: security.currency,
+      exchange: security.exchange,
+      price: latest?.close || null,
+      previousClose: dailyChart.previousClose,
+      financial,
+      periods: { day, week, month },
+      plan: tradePlan(day, week, month),
+      chart: monthRows
+    };
+  });
 }
 
 async function serveStatic(req, res) {
@@ -566,11 +749,27 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { items });
     }
 
-    // 细粒度端点：实时报价（多源）
+    // 发现页翻卡数据：一批含报价 + 迷你走势的股票卡片
+    // watch=逗号分隔的 secid 列表（用户自选），自选股会被排在卡片最前
+    if (url.pathname === "/api/discover") {
+      const count = Math.min(Math.max(Number(url.searchParams.get("count")) || 12, 1), 24);
+      const watch = url.searchParams.get("watch") || "";
+      const cards = await discoverCards(count, watch);
+      return json(res, 200, { cards });
+    }
+
+    // 细粒度端点：实时报价（多源）。优先用 secid 直接定位，避免 symbol 重解析串号
     if (url.pathname === "/api/quote") {
+      const secid = url.searchParams.get("secid");
       const q = url.searchParams.get("q") || "";
-      if (!q.trim()) return json(res, 400, { error: "请输入股票代码或名称" });
-      const security = await resolveSecurity(q);
+      let security;
+      if (secid) {
+        security = securityFromSecid(secid);
+        if (!security) return json(res, 400, { error: "无效的 secid" });
+      } else {
+        if (!q.trim()) return json(res, 400, { error: "请输入股票代码或名称" });
+        security = await resolveSecurity(q);
+      }
       const quote = await getRealtimeQuote(security);
       return json(res, 200, { ...security, ...quote });
     }

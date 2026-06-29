@@ -64,11 +64,10 @@ export interface PurchasePackage {
 export async function getPackages(): Promise<PurchasePackage[]> {
   const Purchases = await getPurchases();
   if (!Purchases || !apiKey || !packagesCache.length) {
-    // mock 套餐
+    // mock 套餐（与上线真实 RC offering 保持一致：仅月/年，无终身档）
     return [
       { id: "monthly", title: "月度", priceString: "¥18.00", per: "/月", raw: null },
       { id: "yearly", title: "年度", priceString: "¥128.00", per: "/年", raw: null },
-      { id: "lifetime", title: "终身", priceString: "¥298.00", per: "一次性", raw: null },
     ];
   }
   return packagesCache.map((p) => ({

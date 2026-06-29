@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>发现 · 翻卡预览</title>
+<style>
+  :root{
+    --bg:#0B0E14; --bgElev:#12161F; --bgCard:#171C26; --bgInput:#1E2430;
+    --text:#E8ECF1; --textSec:#9BA4B5; --textMuted:#5C6678;
+    --border:#232A37; --divider:#1B212B;
+    --up:#F5475D; --upBg:rgba(245,71,93,.12);
+    --down:#16C784; --downBg:rgba(22,199,132,.12);
+    --flat:#8A93A6; --brand:#3B82F6; --gold:#F0B90B;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;overflow:hidden;}
+  .phone{position:relative;width:100%;max-width:420px;height:100%;margin:0 auto;display:flex;flex-direction:column;}
+
+  .header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 8px;}
+  .h1{font-size:24px;font-weight:700;letter-spacing:-.3px;}
+  .sub{color:var(--textMuted);font-size:12px;margin-top:2px;}
+  .refresh{width:36px;height:36px;border-radius:999px;background:rgba(59,130,246,.14);
+    display:flex;align-items:center;justify-content:center;border:none;color:var(--brand);cursor:pointer;font-size:16px;}
+
+  .deck{position:relative;flex:1;display:flex;align-items:center;justify-content:center;padding:8px;}
+  .card{position:absolute;width:min(86vw,340px);height:min(78vh,460px);border-radius:20px;
+    background:var(--bgCard);border:.5px solid var(--border);overflow:hidden;
+    box-shadow:0 16px 40px rgba(0,0,0,.5);will-change:transform;touch-action:none;user-select:none;
+    display:flex;flex-direction:column;padding:16px;}
+  .card.dragging{transition:none;}
+  .card.settle{transition:transform .35s cubic-bezier(.22,1,.36,1);}
+
+  /* 涨：金光层 */
+  .flash-gold{position:absolute;inset:0;pointer-events:none;opacity:0;
+    background:radial-gradient(circle at 50% 40%, rgba(240,185,11,.55), rgba(240,185,11,.12) 45%, transparent 70%);
+    mix-blend-mode:screen;}
+  .card.is-up .flash-gold{animation:goldBreath 2.4s ease-in-out infinite;}
+  @keyframes goldBreath{0%,100%{opacity:.12}50%{opacity:.6}}
+
+  /* 跌：红色闪电层 */
+  .flash-bolt{position:absolute;inset:0;pointer-events:none;opacity:0;
+    background:rgba(245,71,93,.16);}
+  .flash-bolt .bolt{position:absolute;color:var(--up);filter:drop-shadow(0 0 8px var(--up));}
+  .card.is-down .flash-bolt{animation:boltFlicker 1.8s steps(1) infinite;}
+  @keyframes boltFlicker{0%{opacity:.1}3%{opacity:.85}6%{opacity:.15}9%{opacity:.7}12%{opacity:.05}100%{opacity:.05}}
+  .card.is-down.shake{animation:cardShake .5s;}
+  @keyframes cardShake{0%,100%{transform:translateX(0)}20%{transform:translate(-3px,1px)}40%{transform:translate(3px,-1px)}60%{transform:translate(-2px,1px)}80%{transform:translate(2px,0)}}
+
+  /* LIKE / NOPE 角标 */
+  .badge{position:absolute;top:26px;padding:6px 14px;border-radius:999px;border:2.5px solid;
+    font-weight:700;font-size:13px;color:#fff;letter-spacing:.5px;opacity:0;transition:opacity .1s;}
+  .like{left:18px;border-color:var(--gold);background:rgba(240,185,11,.14);transform:rotate(-18deg);}
+  .nope{right:18px;border-color:var(--up);background:rgba(245,71,93,.14);transform:rotate(18deg);}
+
+  .top-row{display:flex;align-items:center;gap:8px;position:relative;z-index:2;}
+  .name{flex:1;font-size:22px;font-weight:700;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .code{color:var(--textMuted);font-size:12px;margin-top:2px;}
+  .chip{display:flex;align-items:center;gap:3px;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+
+  .price-block{display:flex;align-items:flex-end;justify-content:space-between;margin-top:10px;position:relative;z-index:2;}
+  .price{font-size:38px;font-weight:700;letter-spacing:-1px;}
+  .change-box{padding:4px 12px;border-radius:12px;align-items:flex-end;display:flex;flex-direction:column;gap:2px;}
+  .change{font-size:15px;font-weight:700;}
+
+  .spark-wrap{margin-top:18px;text-align:center;position:relative;z-index:2;}
+  .spark-label{color:var(--textMuted);font-size:11px;margin-top:4px;display:block;}
+
+  .stats{display:flex;justify-content:space-between;margin-top:16px;padding-top:12px;border-top:.5px solid var(--divider);position:relative;z-index:2;}
+  .stat{flex:1;text-align:center;}
+  .stat-l{color:var(--textMuted);font-size:11px;}
+  .stat-v{color:var(--text);font-size:13px;font-weight:600;margin-top:3px;}
+
+  .hints{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:12px;position:relative;z-index:2;}
+  .hint{display:flex;align-items:center;gap:6px;color:var(--textMuted);font-size:11px;}
+
+  .actions{display:flex;justify-content:center;align-items:center;gap:18px;padding:10px 0 18px;}
+  .act{width:58px;height:58px;border-radius:999px;background:var(--bgCard);border:1px solid;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:22px;transition:transform .12s;}
+  .act:active{transform:scale(.92);}
+  .act.skip{border-color:rgba(245,71,93,.4);color:var(--up);}
+  .act.detail{width:50px;height:50px;border-color:rgba(59,130,246,.4);color:var(--brand);font-size:20px;}
+  .act.like{border-color:rgba(240,185,11,.4);color:var(--gold);}
+
+  .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--textMuted);}
+  .retry{margin-top:6px;padding:8px 16px;border-radius:999px;background:rgba(59,130,246,.14);color:var(--brand);border:none;font-size:13px;font-weight:600;cursor:pointer;}
+
+  .toast{position:absolute;bottom:96px;left:0;right:0;display:flex;justify-content:center;pointer-events:none;}
+  .toast .t{display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;background:var(--bgElev);border:.5px solid var(--border);font-size:13px;opacity:0;transition:opacity .25s;}
+  .toast.show .t{opacity:1;}
+
+  svg{display:block;}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="header">
+    <div>
+      <div class="h1">发现</div>
+      <div class="sub">滑卡浏览，右滑收藏 · 左滑跳过</div>
+    </div>
+    <button class="refresh" id="refresh" title="换一批">⇄</button>
+  </div>
+
+  <div class="deck" id="deck">
+    <div class="center" id="state">加载中…</div>
+  </div>
+
+  <div class="actions" id="actions" style="visibility:hidden">
+    <button class="act skip" id="bSkip">✕</button>
+    <button class="act detail" id="bDetail">◆</button>
+    <button class="act like" id="bLike">♥</button>
+  </div>
+
+  <div class="toast" id="toast"><div class="t" id="toastT"></div></div>
+</div>
+
+<script>
+const API = "http://127.0.0.1:4173";
+const deck = document.getElementById("deck");
+const stateEl = document.getElementById("state");
+const actions = document.getElementById("actions");
+const toast = document.getElementById("toast");
+const toastT = document.getElementById("toastT");
+
+let cards = [];
+let topEl = null;
+let start = null;
+let dragging = false;
+
+function fmtPrice(v, cur){
+  if(v==null||!isFinite(v)) return "--";
+  const sym = cur==="USD"?"$":cur==="HKD"?"HK$":"¥";
+  return sym + v.toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function fmtPct(v){ if(v==null||!isFinite(v)) return "--"; return (v>0?"+":"")+v.toFixed(2)+"%"; }
+
+function spark(data, tone){
+  if(!data||data.length<2) return "";
+  const w=280,h=92,pad=4;
+  const min=Math.min(...data),max=Math.max(...data),range=Math.max(max-min,.0001);
+  const stepX=(w-pad*2)/Math.max(data.length-1,1);
+  const pts=data.map((c,i)=>({x:pad+i*stepX,y:pad+(1-(c-min)/range)*(h-pad*2)}));
+  const line=pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(2)+" "+p.y.toFixed(2)).join(" ");
+  const fill=`M${pts[0].x.toFixed(2)} ${h-pad} `+pts.map(p=>"L"+p.x.toFixed(2)+" "+p.y.toFixed(2)).join(" ")+` L${pts[pts.length-1].x.toFixed(2)} ${h-pad} Z`;
+  const col=tone==="up"?"#F5475D":"#16C784";
+  const gid=tone==="up"?"gu":"gd";
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${col}" stop-opacity=".32"/><stop offset="1" stop-color="${col}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${fill}" fill="url(#${gid})"/>
+    <path d="${line}" stroke="${col}" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${pts[pts.length-1].x}" cy="${pts[pts.length-1].y}" r="2.6" fill="${col}"/>
+  </svg>`;
+}
+
+function buildCard(c){
+  const change = (c.price!=null&&c.previousClose)?c.price-c.previousClose:null;
+  const changePct = change&&c.previousClose?(change/c.previousClose)*100:null;
+  const isUp = (change||0)>0, isDown=(change||0)<0;
+  const tone = isUp?"up":"down";
+  const priceColor = isUp?"var(--up)":isDown?"var(--down)":"var(--text)";
+  const chipBg = isUp?"var(--upBg)":isDown?"var(--downBg)":"var(--bgInput)";
+  const el = document.createElement("div");
+  el.className = "card settle "+(isUp?"is-up":isDown?"is-down":"");
+  el.dataset.secid = c.secid;
+  el.innerHTML = `
+    <div class="flash-gold"></div>
+    <div class="flash-bolt"><span class="bolt" style="top:80px;left:24px;font-size:54px">⚡</span><span class="bolt" style="bottom:110px;right:22px;font-size:40px">⚡</span></div>
+    <div class="badge like">加入自选</div>
+    <div class="badge nope">跳过</div>
+    <div class="top-row">
+      <div style="flex:1"><div class="name">${c.name}</div><div class="code">${c.symbol} · ${c.exchange}</div></div>
+      <div class="chip" style="background:${chipBg};color:${priceColor}">${isUp?"▲上涨":isDown?"▼下跌":"—平盘"}</div>
+    </div>
+    <div class="price-block">
+      <div class="price" style="color:${priceColor}">${fmtPrice(c.price,c.currency)}</div>
+      <div class="change-box" style="background:${chipBg}">
+        <div class="change" style="color:${priceColor}">${change!=null?(change>0?"+":"")+change.toFixed(2):"--"}</div>
+        <div class="change" style="color:${priceColor}">${fmtPct(changePct)}</div>
+      </div>
+    </div>
+    <div class="spark-wrap">${spark(c.spark.map(r=>r.close),tone)}<span class="spark-label">近 30 日走势</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-l">昨收</div><div class="stat-v">${fmtPrice(c.previousClose,c.currency)}</div></div>
+      <div class="stat"><div class="stat-l">最高</div><div class="stat-v">${fmtPrice(c.high,c.currency)}</div></div>
+      <div class="stat"><div class="stat-l">最低</div><div class="stat-v">${fmtPrice(c.low,c.currency)}</div></div>
+    </div>
+    <div class="hints">
+      <div class="hint">✕ 左滑跳过</div>
+      <div class="hint">右滑加自选 ♥</div>
+    </div>`;
+  return el;
+}
+
+function renderDeck(){
+  deck.querySelectorAll(".card").forEach(e=>e.remove());
+  if(!cards.length){
+    stateEl.style.display="flex";
+    stateEl.textContent="今日卡片已浏览完";
+    actions.style.visibility="hidden";
+    return;
+  }
+  stateEl.style.display="none";
+  actions.style.visibility="visible";
+  // 渲染前 3 张，倒序保证栈顶在上
+  cards.slice(0,3).forEach((c,i)=>{
+    const el = buildCard(c);
+    el.style.zIndex = 10-i;
+    if(i>0){
+      const s = i===1?.95:.9;
+      el.style.transform = `translateY(${i*10}px) scale(${s})`;
+    }
+    deck.appendChild(el);
+  });
+  // 倒序使栈顶最后插入（DOM 最上）
+  [...deck.querySelectorAll(".card")].reverse();
+  topEl = deck.querySelector(".card");
+  attachDrag(topEl);
+}
+
+function attachDrag(el){
+  if(!el) return;
+  const onStart=(x,y)=>{start={x,y,dx:0,dy:0};dragging=true;el.classList.remove("settle");el.classList.add("dragging");};
+  const onMove=(x,y)=>{
+    if(!dragging) return;
+    const dx=x-start.x, dy=(y-start.y)*.4;
+    start.dx=dx; start.dy=dy;
+    const rot=(dx/window.innerWidth)*22;
+    el.style.transform=`translate(${dx}px,${dy}px) rotate(${rot}deg)`;
+    const likeO=Math.max(0,Math.min(1,(dx-40)/80));
+    const nopeO=Math.max(0,Math.min(1,(-dx-40)/80));
+    el.querySelector(".like").style.opacity=likeO;
+    el.querySelector(".nope").style.opacity=nopeO;
+  };
+  const onEnd=(vx)=>{
+    if(!dragging) return;
+    dragging=false;
+    el.classList.remove("dragging");
+    const dx=start.dx;
+    const dir = dx>0?"right":"left";
+    const thr = window.innerWidth*0.28;
+    if(Math.abs(dx)>thr || Math.abs(vx)>800){
+      const exitX = dir==="right"?window.innerWidth:-window.innerWidth;
+      el.classList.add("settle");
+      el.style.transform=`translate(${exitX}px,${start.dy}px) rotate(${dir==="right"?28:-28}deg)`;
+      el.style.opacity="0";
+      setTimeout(()=>swipeDone(dir),250);
+    }else{
+      el.classList.add("settle");
+      el.style.transform="translate(0,0) rotate(0)";
+      el.querySelector(".like").style.opacity=0;
+      el.querySelector(".nope").style.opacity=0;
+    }
+  };
+
+  el.addEventListener("pointerdown",e=>{el.setPointerCapture(e.pointerId);onStart(e.clientX,e.clientY);});
+  el.addEventListener("pointermove",e=>onMove(e.clientX,e.clientY));
+  el.addEventListener("pointerup",e=>onEnd(0));
+  el.addEventListener("pointercancel",()=>onEnd(0));
+  el.addEventListener("click",()=>{ if(!dragging && Math.abs(start?.dx||0)<6) openAnalyze(el.dataset.secid); });
+}
+
+function openAnalyze(secid){ /* 预览里仅提示 */ showToast("点卡片可在 App 内进入分析页"); }
+
+function swipeDone(dir){
+  const top = cards[0];
+  if(dir==="right" && top){
+    showToast(`已加入自选 · ${top.name}`);
+  }
+  cards.shift();
+  if(cards.length<=4) loadMore(true);
+  renderDeck();
+}
+
+function manual(dir){
+  if(!topEl||!cards.length) return;
+  const exitX = dir==="right"?window.innerWidth:-window.innerWidth;
+  topEl.classList.add("settle");
+  topEl.style.transform=`translate(${exitX}px,0) rotate(${dir==="right"?28:-28}deg)`;
+  topEl.style.opacity="0";
+  setTimeout(()=>swipeDone(dir),250);
+}
+
+let toastTimer;
+function showToast(msg){
+  toastT.textContent=msg;
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>toast.classList.remove("show"),1600);
+}
+
+async function loadMore(silent){
+  try{
+    const res = await fetch(`${API}/api/discover?count=12`);
+    const data = await res.json();
+    if(data.cards?.length){ cards.push(...data.cards); if(!silent) renderDeck(); }
+  }catch(e){ if(!silent){ stateEl.textContent="连接后端失败，确保 server.js 在 127.0.0.1:4173 运行"; } }
+}
+
+async function load(){
+  stateEl.style.display="flex";
+  stateEl.textContent="加载中…";
+  actions.style.visibility="hidden";
+  try{
+    const res = await fetch(`${API}/api/discover?count=14`);
+    const data = await res.json();
+    cards = data.cards||[];
+    renderDeck();
+  }catch(e){
+    deck.querySelectorAll(".card").forEach(e=>e.remove());
+    stateEl.textContent="连接后端失败：请先在本机运行 server.js（端口 4173）";
+  }
+}
+
+document.getElementById("refresh").onclick=load;
+document.getElementById("bSkip").onclick=()=>manual("left");
+document.getElementById("bLike").onclick=()=>manual("right");
+document.getElementById("bDetail").onclick=()=>{ if(cards[0]) openAnalyze(cards[0].secid); };
+
+load();
+</script>
+</body>
+</html>

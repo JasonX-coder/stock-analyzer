@@ -119,8 +119,9 @@ curl https://你的地址/api/health
      | `stock_pro_yearly` | 1 年 | ¥128 | Pro 年度 |
    - 每个产品填：参考名称、价格档、本地化描述、订阅时长
    - 上传订阅截图（付费墙界面截图）
-3. **App 内购买项目** → 单独创建非订阅型（可选）：
-   - `stock_pro_lifetime`，类型选「非消耗型」，价格 ¥298
+   - ⚠️ **第一版不要建终身档 `stock_pro_lifetime`**。代码与付费墙已移除终身档（见 `paywall.tsx` MOCK_PLANS、`purchases.ts` mock），避免「非消耗型 + 自动续订」混用付费墙的审核风险；过审后再加。
+3. ~~**App 内购买项目** → 单独创建非订阅型（可选）：~~（第一版已移除）
+   - ~~`stock_pro_lifetime`，类型选「非消耗型」，价格 ¥298~~
 4. 把这些产品 ID 在 RevenueCat 后台对应填好（见第 2 步）
 5. **App 信息**：
    - 填隐私政策 URL：`https://stock-analyzer-xxxx.onrender.com/privacy`（页面已随第 1 步后端部署，文件为 `public/privacy.html`，无需另建 GitHub Pages）
